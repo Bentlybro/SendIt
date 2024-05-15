@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SendIt</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-family: Arial, sans-serif;
+            height: 100vh;
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            background-color: #121212;
+            color: #ffffff;
+            overflow: hidden;
+        }
+        .container {
+            text-align: center;
+            position: relative;
+            z-index: 1;
+            padding: 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            border-radius: 10px;
+        }
+        #drop_zone {
+            border: 2px dashed #bbb;
+            border-radius: 5px;
+            padding: 50px;
+            text-align: center;
+            font: 20px sans-serif;
+            color: #bbb;
+            margin-bottom: 20px;
+            cursor: pointer;
+        }
+        #code_display, #countdown_display {
+            margin: 10px 0;
+        }
+        input[type="text"], button {
+            padding: 10px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+        }
+        input[type="text"] {
+            width: 200px;
+            text-align: center;
+        }
+        button {
+            background-color: #444;
+            color: #ffffff;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #555;
+        }
+        input[type="file"] {
+            display: none;
+        }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="star-canvas"></canvas>
+    <div class="container">
+        <h1>SendIt</h1>
+        <div id="drop_zone">Drop files here or press to choose a file</div>
+        <input type="file" id="file_input">
+        <div id="code_display"></div>
+        <div id="countdown_display"></div>
+        <input type="text" id="code_input" placeholder="Enter code to download">
+        <button id="download_button">Download</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('star-canvas');
+        const ctx = canvas.getContext('2d');
+        
+        let width, height;
+        let stars = [];
+        const maxStars = 100;
+
+        function initCanvas() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
+
+        function random(min, max) {
+            return min + Math.random() * (max - min);
+        }
+
+        function createStars() {
+            for (let i = 0; i < maxStars; i++) {
+                stars.push({
+                    x: random(0, width),
+                    y: random(0, height),
+                    radius: random(0.5, 1.5),
+                    speed: random(0.1, 0.5),
+                    twinkle: random(0.2, 1)
+                });
+            }
+        }
+
+        function drawStars() {
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = '#ffffff';
+            ctx.shadowBlur = 5;
+            ctx.shadowColor = '#ffffff';
+            stars.forEach(star => {
+                ctx.globalAlpha = star.twinkle;
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2, false);
+                ctx.fill();
+                star.y += star.speed;
+                if (star.y > height) {
+                    star.y = 0;
+                    star.x = random(0, width);
+                }
+                star.twinkle += (Math.random() - 0.5) * 0.1;
+                if (star.twinkle < 0.2) star.twinkle = 0.2;
+                if (star.twinkle > 1) star.twinkle = 1;
+            });
+            requestAnimationFrame(drawStars);
+        }
+
+        window.addEventListener('resize', initCanvas);
+        initCanvas();
+        createStars();
+        drawStars();
+
+        const socket = io();
+
+        const dropZone = document.getElementById('drop_zone');
+        const fileInput = document.getElementById('file_input');
+        const codeDisplay = document.getElementById('code_display');
+        const countdownDisplay = document.getElementById('countdown_display');
+        const codeInput = document.getElementById('code_input');
+        const downloadButton = document.getElementById('download_button');
+
+        dropZone.addEventListener('dragover', (event) => {
+            event.preventDefault();
+        });
+
+        dropZone.addEventListener('drop', (event) => {
+            event.preventDefault();
+            const file = event.dataTransfer.files[0];
+            if (file) {
+                handleFileUpload(file);
+            }
+        });
+
+        dropZone.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                handleFileUpload(file);
+            }
+        });
+
+        function handleFileUpload(file) {
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const arrayBuffer = event.target.result;
+                const byteArray = new Uint8Array(arrayBuffer);
+                socket.emit('upload_file', {file: {name: file.name, content: Array.from(byteArray)}});
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        socket.on('file_uploaded', (data) => {
+            codeDisplay.innerText = 'File code: ' + data.code;
+        });
+
+        downloadButton.addEventListener('click', () => {
+            const code = codeInput.value;
+            if (code) {
+                socket.emit('join', {code: code});
+                socket.emit('download_request', {code: code});
+            } else {
+                alert('Please enter a code.');
+            }
+        });
+
+        socket.on('countdown', (data) => {
+            countdownDisplay.innerText = 'Time remaining: ' + data.remaining_time + ' seconds';
+        });
+
+        socket.on('download_file', (data) => {
+            const file = data.file;
+            const byteArray = new Uint8Array(file.content);
+            const blob = new Blob([byteArray], {type: 'application/octet-stream'});
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = file.name;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+
+        socket.on('error', (data) => {
+            alert(data.message);
+        });
+
+        socket.on('file_expired', (data) => {
+            alert('File has expired');
+            codeDisplay.innerText = '';
+            countdownDisplay.innerText = '';
+        });
+
+        socket.on('file_downloading', (data) => {
+            countdownDisplay.innerText = data.message;
+        });
+    </script>
+</body>
+</html>

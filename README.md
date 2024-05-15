@@ -49,6 +49,9 @@ sequenceDiagram
     Sender->>Receiver: Transfer file directly
     Receiver->>Sender: Notify file received
     WebInterface->>Receiver: Transfer completed
+
+    Note right of WebInterface: Once file transfer is completed, the connection is closed and resources are cleaned up.
+
 ```
 
 # Contributing
